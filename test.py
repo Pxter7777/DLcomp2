@@ -48,13 +48,13 @@ def random_flip_horizontal(src_img, main_img, target_main):
         h = int(root.find('size/height').text)
         for box in root.iter('object'):
             new_xmin = w-int(box.find("bndbox/xmin").text)
-            #new_ymin = h-int(box.find("bndbox/ymin").text)
+            new_ymin = h-int(box.find("bndbox/ymin").text)
             new_xmax = w-int(box.find("bndbox/xmax").text)
-            #new_ymax = h-int(box.find("bndbox/ymax").text)
+            new_ymax = h-int(box.find("bndbox/ymax").text)
             box.find("bndbox/xmin").text = str(new_xmin)
             box.find("bndbox/xmax").text = str(new_xmax)
-            #box.find("bndbox/ymin").text = str(new_ymin)
-            #box.find("bndbox/ymax").text = str(new_ymax)
+            box.find("bndbox/ymin").text = str(new_ymin)
+            box.find("bndbox/ymax").text = str(new_ymax)
             #box.set('bndbox/xmin', str(new_xmin))
             #box.set('bndbox/xmax', str(new_xmax))
             #box.set('bndbox/ymin', str(new_ymin))
@@ -77,9 +77,9 @@ def img_add(src_img, main_img, box, tree):
     canvas[s_h:s_h+m_h, s_w:s_w+m_w] = main_img
     
     min_y = int(s_h)
-    max_y = max(int(m_h), min_y+1)
+    max_y = int(m_h)
     min_x = int(s_w)
-    max_x = max(int(m_w), min_x+1)
+    max_x = int(m_w)
     new_x = np.random.randint(low=min_x, high=max_x)
     new_y = np.random.randint(low=min_y, high=max_y)
 
@@ -91,7 +91,7 @@ def img_add(src_img, main_img, box, tree):
     local_xmin = max(0, new_x-s_w)
     local_xmax = min(m_w, new_x)
     local_ymin = max(0, new_y-s_h)
-    local_ymax = min(m_h, new_y)
+    local_ymax = min(m_w, new_y)
     
     new_box = ET.Element('object')
     #ET.dump(new_box)
@@ -126,13 +126,13 @@ def copy_paste(box, target_main):
     # Large Scale Jittering
     src_img = Large_Scale_Jittering(src_img)
     # for the last
-    #cv2.imshow("MYI",src_img)
-    #cv2.waitKey(0)
+    cv2.imshow("MYI",src_img)
+    cv2.waitKey(0)
     img = img_add(src_img, main_img, box, tree)
     global count 
     count += 1
-    xml_path = os.path.join(output_annotation_path, '{:0>5d}'.format(count)+'.xml')
-    jpg_path = os.path.join(output_Image_path, '{:0>5d}'.format(count)+'.jpg')
+    xml_path = os.path.join(output_annotation_path, str(count)+'.xml')
+    jpg_path = os.path.join(output_Image_path, str(count)+'.jpg')
 
     tree.write(xml_path)
     cv2.imwrite(jpg_path, img)
@@ -152,28 +152,25 @@ box_dict = {}
 
 def main():
     #target_list = [os.path.splitext(i)[0] for i in os.listdir(train_annotation_path)]
-    target_list = [i.split('.')[0] for i in os.listdir(train_annotation_path)]
+    target_list = [i.split('.')[0] for i in os.listdir(output_annotation_path)]
     global box_list
     
     # read all box in train dataset
     for target in tqdm(target_list):
-        target_xml_path = os.path.join(train_annotation_path, target + '.xml')
+        print(target)
+        target_xml_path = os.path.join(output_annotation_path, target + '.xml')
         #target_Image_path = os.path.join(train_Image_path, target + '.jpg')
         content = read_content(target_xml_path)
-        box_list += content
-        #box_dict[target] = content
-    #print(box_list)
-    #print(box_dict)
-    if not os.path.exists('output'):
-        os.mkdir('output')
-    if not os.path.exists('output\JPEGImages'):
-        os.mkdir('output\JPEGImages')
-    if not os.path.exists('output\Annotations'):
-        os.mkdir('output\Annotations')
-    # for all box, randomlypaste onto a pic
-    for box in tqdm(box_list):
-        target_main = np.random.choice(target_list)
-        copy_paste(box, target_main)
+        jpg_path = os.path.join(output_Image_path, target + '.jpg')
+        img = cv2.imread(jpg_path)
+        #cv2.imshow(img)
+        for b in content:
+            cv2.rectangle(img,(b['xmin'],b['ymin']),(b['xmax'],b['ymax']),(0,255,0),2)
+        cv2.imshow("Show",img)
+        cv2.waitKey()  
+        #box_list += content
+
+
 
 
 
