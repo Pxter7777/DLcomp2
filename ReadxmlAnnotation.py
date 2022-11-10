@@ -47,9 +47,9 @@ def random_flip_horizontal(src_img, main_img, target_main):
         w = int(root.find('size/width').text)
         h = int(root.find('size/height').text)
         for box in root.iter('object'):
-            new_xmin = w-int(box.find("bndbox/xmin").text)
+            new_xmax = w-int(box.find("bndbox/xmin").text)
             #new_ymin = h-int(box.find("bndbox/ymin").text)
-            new_xmax = w-int(box.find("bndbox/xmax").text)
+            new_xmin = w-int(box.find("bndbox/xmax").text)
             #new_ymax = h-int(box.find("bndbox/ymax").text)
             box.find("bndbox/xmin").text = str(new_xmin)
             box.find("bndbox/xmax").text = str(new_xmax)
@@ -65,8 +65,11 @@ def Large_Scale_Jittering(img):
     rescale_ratio = np.random.uniform(0.1, 2.0)
     h, w, _, = img.shape
     # rescale
-    h_new, w_new = int(h*rescale_ratio), int(w*rescale_ratio)
-    img = cv2.resize(img, (w_new, h_new), interpolation=cv2.INTER_LINEAR)
+    h_new, w_new = max(int(h*rescale_ratio),1), max(int(w*rescale_ratio),1)
+    try:
+        img = cv2.resize(img, (w_new, h_new), interpolation=cv2.INTER_LINEAR)
+    except:
+        print("WHAT???")
     return img
 def img_add(src_img, main_img, box, tree):
     s_h, s_w, _, = src_img.shape
@@ -92,7 +95,8 @@ def img_add(src_img, main_img, box, tree):
     local_xmax = min(m_w, new_x)
     local_ymin = max(0, new_y-s_h)
     local_ymax = min(m_h, new_y)
-    
+    #cv2.rectangle(output_img,(local_xmin,local_ymin),(local_xmax,local_ymax),(255,0,0),2)
+   
     new_box = ET.Element('object')
     #ET.dump(new_box)
     
@@ -107,6 +111,40 @@ def img_add(src_img, main_img, box, tree):
     ET.SubElement(bndbox, 'ymax').text = str(local_ymax)
 
     root = tree.getroot()
+
+     # remove overlap
+    box_count = 0
+    for box in root.iter('object'):
+        box_count+=1
+    actual_count = 0
+    boxes = [i for i in root.iter('object')]
+    for box in boxes:
+        actual_count += 1
+        xmin = int(box.find("bndbox/xmin").text)
+        ymin = int(box.find("bndbox/ymin").text)
+        xmax = int(box.find("bndbox/xmax").text)
+        ymax = int(box.find("bndbox/ymax").text)
+        dx = max(min(xmax, local_xmax) - max(xmin, local_xmin), 0)
+        dy = max(min(ymax, local_ymax) - max(ymin, local_ymin), 0)
+        #cv2.rectangle(output_img,(xmin,ymin),(xmax,ymax),(0,0,255),2)
+        #cv2.imshow("Show",output_img)
+        #cv2.waitKey()  
+        overlap = dx*dy
+        box_area = (xmax-xmin)*(ymax-ymin)
+        #ET.SubElement(box, "AREA").text = str(overlap)+'==='+str(box_area)
+        #ET.dump(root)
+        #print(overlap, box_area)
+        #print("HEY")
+        if overlap >= box_area*0.6:
+            #
+            
+            root.remove(box)
+            #ET.dump(root)
+            #print("HEY")
+            #ET.SubElement(box, 'OVER')
+
+    if actual_count!=box_count:
+        print(actual_count, box_count)
     root.append(new_box)
     output_annotation_path
     #ET.dump(new_box)

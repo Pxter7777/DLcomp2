@@ -154,7 +154,7 @@ def main():
     #target_list = [os.path.splitext(i)[0] for i in os.listdir(train_annotation_path)]
     target_list = [i.split('.')[0] for i in os.listdir(output_annotation_path)]
     global box_list
-    
+
     # read all box in train dataset
     for target in tqdm(target_list):
         print(target)
@@ -165,7 +165,7 @@ def main():
         img = cv2.imread(jpg_path)
         #cv2.imshow(img)
         for b in content:
-            cv2.rectangle(img,(b['xmin'],b['ymin']),(b['xmax'],b['ymax']),(0,255,0),2)
+            cv2.rectangle(img,(b['xmin'],b['ymin']),(b['xmax'],b['ymax']),(255,255,255),5)
         cv2.imshow("Show",img)
         cv2.waitKey()  
         #box_list += content
