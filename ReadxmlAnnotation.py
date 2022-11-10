@@ -154,7 +154,7 @@ def img_add(src_img, main_img, box, tree):
     return output_img
     
 
-count = 0 
+count = 10000
 def copy_paste(box, target_main):
     # read img
     src_img = crop_img(box)
@@ -169,8 +169,8 @@ def copy_paste(box, target_main):
     img = img_add(src_img, main_img, box, tree)
     global count 
     count += 1
-    xml_path = os.path.join(output_annotation_path, '{:0>5d}'.format(count)+'.xml')
-    jpg_path = os.path.join(output_Image_path, '{:0>5d}'.format(count)+'.jpg')
+    xml_path = os.path.join(output_annotation_path, '{:0>6d}'.format(count)+'.xml')
+    jpg_path = os.path.join(output_Image_path, '{:0>6d}'.format(count)+'.jpg')
 
     tree.write(xml_path)
     cv2.imwrite(jpg_path, img)
