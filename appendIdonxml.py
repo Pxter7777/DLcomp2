@@ -29,8 +29,10 @@ NametoId = {
     'train': 18,
     'tvmonitor': 19
 }
-origin_xml_path = os.path.join('.', 'datalab-2021-cup2-object-detection\VOCdevkit_train\VOC2007\Annotations')
-output_xml_path = os.path.join('.', 'newoutput')
+origin_xml_path = os.path.join('.', 'output', "Annotations")
+output_xml_path = os.path.join('.', 'output', "Annotations_with_ID")
+if not os.path.exists(output_xml_path):
+    os.mkdir(output_xml_path)
 def read_content(target: str):
     xml_path = os.path.join(origin_xml_path, target+'.xml')
     tree = ET.parse(xml_path)

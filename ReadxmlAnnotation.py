@@ -6,6 +6,10 @@ import os
 import cv2
 from tqdm import tqdm, trange
 import numpy as np
+import pandas as pd
+import time
+import warnings
+warnings.filterwarnings("ignore")
 
 NametoId = {
     'aeroplane': 0,
@@ -30,17 +34,21 @@ NametoId = {
     'tvmonitor': 19
 }
 
-def read_content(xml_file: str):
-    tree = ET.parse(xml_file)
+def read_content(target: str):
+    target_xml_path = os.path.join(train_annotation_path, target + '.xml')
+    tree = ET.parse(target_xml_path)
     root = tree.getroot()
     list_with_all_boxes = []
-    
+    global box_pool, Record, img_pool
+    box_count_list = [0]*20
     for boxes in root.iter('object'):
         name = boxes.find('name').text
+        Id = NametoId.get(name, -1)
+        #Record[Id] += 1
         box = {
             'target':root.find('filename').text.split('.')[0],
             'name':name,
-            #'Id': NametoId
+            'Id': Id,
             'pose':boxes.find('pose').text,
             'truncated':boxes.find('truncated').text,
             'difficult':boxes.find('difficult').text,
@@ -50,7 +58,12 @@ def read_content(xml_file: str):
             'ymax':int(boxes.find("bndbox/ymax").text)
         }
         list_with_all_boxes.append(box)
+        box_pool = box_pool.append(box, ignore_index=True)
+        Record[Id] += 1
+        box_count_list[Id] += 1
+    img_pool.loc[target] = box_count_list
     return list_with_all_boxes
+
 def crop_img(box):
     jpg_path = os.path.join(train_Image_path, box['target']+'.jpg')
     img = cv2.imread(jpg_path)
@@ -97,6 +110,8 @@ def Large_Scale_Jittering(img):
         print("WHAT???")
     return img
 def img_add(src_img, main_img, box, tree):
+    global Record
+
     s_h, s_w, _, = src_img.shape
     m_h, m_w, _, = main_img.shape
     h = s_h*2 + m_h
@@ -151,28 +166,19 @@ def img_add(src_img, main_img, box, tree):
         ymax = int(box.find("bndbox/ymax").text)
         dx = max(min(xmax, local_xmax) - max(xmin, local_xmin), 0)
         dy = max(min(ymax, local_ymax) - max(ymin, local_ymin), 0)
-        #cv2.rectangle(output_img,(xmin,ymin),(xmax,ymax),(0,0,255),2)
-        #cv2.imshow("Show",output_img)
-        #cv2.waitKey()  
+
         overlap = dx*dy
         box_area = (xmax-xmin)*(ymax-ymin)
-        #ET.SubElement(box, "AREA").text = str(overlap)+'==='+str(box_area)
-        #ET.dump(root)
-        #print(overlap, box_area)
-        #print("HEY")
         if overlap >= box_area*0.6:
-            #
-            
             root.remove(box)
-            #ET.dump(root)
-            #print("HEY")
-            #ET.SubElement(box, 'OVER')
+        else:
+            Id = NametoId.get(box.find("name").text, -1)
+            Record[Id] += 1
+
 
     if actual_count!=box_count:
         print(actual_count, box_count)
     root.append(new_box)
-    output_annotation_path
-    #ET.dump(new_box)
     
     ET.indent(root)
     #ET.dump(root)
@@ -213,31 +219,64 @@ output_Image_path = os.path.join('.', 'output', 'JPEGImages')
 box_list = []
 box_dict = {}
 
+Record = [0]*20 
+box_pool = pd.DataFrame(columns=['target', 'name', 'Id', 'pose', 'truncated', 'difficult', 'xmin', 'ymin', 'xmax', 'ymax'])
+img_pool = pd.DataFrame(columns = [i for i in range(20)])
+img_pool = pd.DataFrame(columns = [i for i in range(20)])
+def balance_pick():
+    global Record, box_pool, img_pool
+    min_count, max_count = min(Record), max(Record)
+    max1, max2, max3, max4, max5 = sorted(Record, reverse=True)[:5]
+    if min_count*1.2 > max_count: # balanced
+        return None, None
+    else: # inbalanced
+        min_class, max_class = Record.index(min_count), Record.index(max_count)
+        max1_class = Record.index(max1)
+        max2_class = Record.index(max2)
+        max3_class = Record.index(max3)
+        max4_class = Record.index(max4)
+        max5_class = Record.index(max5)
+        pick_box = box_pool[box_pool['Id']==min_class].sample(n=1).to_dict('records')[0]
+        main_img = img_pool[(img_pool[max1_class]==0) & (img_pool[max2_class]==0) & (img_pool[max3_class]==0) & (img_pool[max4_class]==0) & (img_pool[max5_class]==0)].sample(n=1).index[0]
+        return pick_box, main_img
+
+
 def main():
     #target_list = [os.path.splitext(i)[0] for i in os.listdir(train_annotation_path)]
-    target_list = [i.split('.')[0] for i in os.listdir(train_annotation_path)]
-    global box_list
-    
+    target_list = [i.split('.')[0] for i in os.listdir(train_annotation_path)[:]]
+    global box_list, Record
+    #global box_pool
     # read all box in train dataset
+    #global Record
+
     for target in tqdm(target_list):
-        target_xml_path = os.path.join(train_annotation_path, target + '.xml')
+        
         #target_Image_path = os.path.join(train_Image_path, target + '.jpg')
-        content = read_content(target_xml_path)
+        content = read_content(target)
         box_list += content
-        #box_dict[target] = content
-    #print(box_list)
-    #print(box_dict)
     if not os.path.exists('output'):
         os.mkdir('output')
     if not os.path.exists('output\JPEGImages'):
         os.mkdir('output\JPEGImages')
     if not os.path.exists('output\Annotations'):
         os.mkdir('output\Annotations')
-    # for all box, randomlypaste onto a pic
-    for box in tqdm(box_list):
-        target_main = np.random.choice(target_list)
-        copy_paste(box, target_main)
-
+    
+    print(box_pool.head(5))
+    print(Record)
+    #print(img_pool)
+    #return
+    #for box in tqdm(box_list):
+    #    target_main = np.random.choice(target_list)
+    #    copy_paste(box, target_main)
+    #return
+    pick, target_main = balance_pick()
+    
+    while pick != None:
+        Record[pick['Id']] += 1
+        print(Record)
+        #target_main = np.random.choice(target_list)
+        copy_paste(pick, target_main)
+        pick, target_main = balance_pick()
 
 
 if __name__=='__main__':
