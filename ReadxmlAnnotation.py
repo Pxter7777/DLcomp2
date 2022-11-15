@@ -109,6 +109,95 @@ def Large_Scale_Jittering(img):
     except:
         print("WHAT???")
     return img
+
+def img_clone(src_img, main_img, box, tree):
+    
+    global Record
+
+    s_h, s_w, _, = src_img.shape
+    m_h, m_w, _, = main_img.shape
+    h = s_h*2 + m_h
+    w = s_w*2 + m_w
+    canvas = np.zeros((h,w,3), dtype = np.uint8)
+    canvas[s_h:s_h+m_h, s_w:s_w+m_w] = main_img
+
+    #canvas = im
+    mask = 255*np.ones(src_img.shape, src_img.dtype)
+    if (mask.shape[0]<=4) or (mask.shape[1]<=4):
+        return None
+    h_var = np.random.randint(low=int(s_h*1.5), high=max(int(s_h*0.5+m_h),int(s_h*1.5)+1))
+    w_var = np.random.randint(low=int(s_w*1.5), high=max(int(s_w*0.5+m_w),int(s_w*1.5)+1))
+
+    center = (w_var, h_var)
+    try:
+        normal_clone = cv2.seamlessClone(src_img, canvas, mask, center, cv2.NORMAL_CLONE)
+    except:
+        print("WTF")
+    output_img = normal_clone[s_h:s_h+m_h, s_w:s_w+m_w]
+    #cv2.imshow('o', src_img)
+    #cv2.waitKey()
+    #cv2.imshow('o', mask)
+    #cv2.waitKey()
+    #cv2.imshow('o', canvas)
+    #cv2.waitKey()
+    #cv2.imshow('o', output_img)
+    #cv2.waitKey()
+    # modify annotation
+    local_xmin = max(0, int(w_var-1.5*s_w))
+    local_xmax = min(m_w, int(w_var-0.5*s_w))
+    local_ymin = max(0, int(h_var-1.5*s_h))
+    local_ymax = min(m_h, int(h_var-0.5*s_h))
+   
+    new_box = ET.Element('object')
+    #ET.dump(new_box)
+    
+    ET.SubElement(new_box, 'name').text = box['name']
+    ET.SubElement(new_box, 'pose').text = box['pose']
+    ET.SubElement(new_box, 'truncated').text = box['truncated']
+    ET.SubElement(new_box, 'difficult').text = box['difficult']
+    bndbox = ET.SubElement(new_box, 'bndbox')
+    ET.SubElement(bndbox, 'xmin').text = str(local_xmin)
+    ET.SubElement(bndbox, 'ymin').text = str(local_ymin)
+    ET.SubElement(bndbox, 'xmax').text = str(local_xmax)
+    ET.SubElement(bndbox, 'ymax').text = str(local_ymax)
+
+    root = tree.getroot()
+
+     # remove overlap
+    box_count = 0
+    for box in root.iter('object'):
+        box_count+=1
+    actual_count = 0
+    boxes = [i for i in root.iter('object')]
+    for box in boxes:
+        actual_count += 1
+        xmin = int(box.find("bndbox/xmin").text)
+        ymin = int(box.find("bndbox/ymin").text)
+        xmax = int(box.find("bndbox/xmax").text)
+        ymax = int(box.find("bndbox/ymax").text)
+        dx = max(min(xmax, local_xmax) - max(xmin, local_xmin), 0)
+        dy = max(min(ymax, local_ymax) - max(ymin, local_ymin), 0)
+
+        overlap = dx*dy
+        box_area = (xmax-xmin)*(ymax-ymin)
+        if overlap >= box_area*0.6:
+            root.remove(box)
+        else:
+            Id = NametoId.get(box.find("name").text, -1)
+            Record[Id] += 1
+
+
+    if actual_count!=box_count:
+        print(actual_count, box_count)
+    root.append(new_box)
+    
+    ET.indent(root)
+    #ET.dump(root)
+    return output_img
+
+
+
+    return normal_clone
 def img_add(src_img, main_img, box, tree):
     global Record
 
@@ -197,18 +286,16 @@ def copy_paste(box, target_main):
     # for the last
     #cv2.imshow("MYI",src_img)
     #cv2.waitKey(0)
-    img = img_add(src_img, main_img, box, tree)
-    global count 
-    count += 1
-    xml_path = os.path.join(output_annotation_path, '{:0>6d}'.format(count)+'.xml')
-    jpg_path = os.path.join(output_Image_path, '{:0>6d}'.format(count)+'.jpg')
+    img = img_clone(src_img, main_img, box, tree)
+    #img = img_add(src_img, main_img, box, tree)
+    if img is not None:
+        global count 
+        count += 1
+        xml_path = os.path.join(output_annotation_path, '{:0>6d}'.format(count)+'.xml')
+        jpg_path = os.path.join(output_Image_path, '{:0>6d}'.format(count)+'.jpg')
 
-    tree.write(xml_path)
-    cv2.imwrite(jpg_path, img)
-    # flip main
-    # randomly place pic
-        # pick place
-        # generate pic and 
+        tree.write(xml_path)
+        cv2.imwrite(jpg_path, img)
 
 
 data_folder_path = os.path.join('.', 'datalab-2021-cup2-object-detection')
@@ -243,7 +330,7 @@ def balance_pick():
 
 def main():
     #target_list = [os.path.splitext(i)[0] for i in os.listdir(train_annotation_path)]
-    target_list = [i.split('.')[0] for i in os.listdir(train_annotation_path)[:]]
+    target_list = [i.split('.')[0] for i in os.listdir(train_annotation_path)[:100]]
     global box_list, Record
     #global box_pool
     # read all box in train dataset
@@ -275,6 +362,7 @@ def main():
         Record[pick['Id']] += 1
         print(Record)
         #target_main = np.random.choice(target_list)
+        #copy_paste(box_pool.iloc[14].to_dict(),'000026')
         copy_paste(pick, target_main)
         pick, target_main = balance_pick()
 
