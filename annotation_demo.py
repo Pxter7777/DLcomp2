@@ -14,11 +14,6 @@ def read_content(xml_file: str):
     
     for boxes in root.iter('object'):
         box = {
-            'target':root.find('filename').text.split('.')[0],
-            'name':boxes.find('name').text,
-            'pose':boxes.find('pose').text,
-            'truncated':boxes.find('truncated').text,
-            'difficult':boxes.find('difficult').text,
             'xmin':int(boxes.find("bndbox/xmin").text),
             'ymin':int(boxes.find("bndbox/ymin").text),
             'xmax':int(boxes.find("bndbox/xmax").text),
@@ -147,26 +142,31 @@ train_annotation_path = os.path.join(data_folder_path, 'VOCdevkit_train', 'VOC20
 train_Image_path = os.path.join(data_folder_path, 'VOCdevkit_train', 'VOC2007', 'JPEGImages')
 output_annotation_path = os.path.join('.', 'output', 'Annotations')
 output_Image_path = os.path.join('.', 'output', 'JPEGImages')
+
+output_path = os.path.join('.', 'jittering_data', 'output')
+output_Image_Path = os.path.join(output_path, 'JPEGImages')
+output_Annotation_Path = os.path.join(output_path, 'Annotations_with_ID')
 box_list = []
 box_dict = {}
 
 def main():
     #target_list = [os.path.splitext(i)[0] for i in os.listdir(train_annotation_path)]
-    target_list = [i.split('.')[0] for i in os.listdir(output_annotation_path)]
+    target_list = [i.split('.')[0] for i in os.listdir(output_Annotation_Path)[50000:]]
+    #target_list = ['0000056', '0000075']
     global box_list
 
     # read all box in train dataset
     for target in tqdm(target_list):
         print(target)
-        target_xml_path = os.path.join(output_annotation_path, target + '.xml')
+        target_xml_path = os.path.join(output_Annotation_Path, target + '.xml')
         #target_Image_path = os.path.join(train_Image_path, target + '.jpg')
         content = read_content(target_xml_path)
-        jpg_path = os.path.join(output_Image_path, target + '.jpg')
+        jpg_path = os.path.join(output_Image_Path, target + '.jpg')
         img = cv2.imread(jpg_path)
         #cv2.imshow(img)
         for b in content:
             cv2.rectangle(img,(b['xmin'],b['ymin']),(b['xmax'],b['ymax']),(255,255,255),5)
-        cv2.imshow("Show",img)
+        cv2.imshow(target,img)
         cv2.waitKey()  
         #box_list += content
 

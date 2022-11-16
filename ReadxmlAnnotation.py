@@ -3,6 +3,7 @@ from multiprocessing.sharedctypes import Value
 import xml.etree.ElementTree as ET
 import xml.dom.minidom
 import os
+from zoneinfo import available_timezones
 import cv2
 from tqdm import tqdm, trange
 import numpy as np
@@ -33,7 +34,7 @@ NametoId = {
     'train': 18,
     'tvmonitor': 19
 }
-
+outerbox_ID = 0
 def read_content(target: str):
     target_xml_path = os.path.join(train_annotation_path, target + '.xml')
     tree = ET.parse(target_xml_path)
@@ -49,9 +50,6 @@ def read_content(target: str):
             'target':root.find('filename').text.split('.')[0],
             'name':name,
             'Id': Id,
-            'pose':boxes.find('pose').text,
-            'truncated':boxes.find('truncated').text,
-            'difficult':boxes.find('difficult').text,
             'xmin':int(boxes.find("bndbox/xmin").text),
             'ymin':int(boxes.find("bndbox/ymin").text),
             'xmax':int(boxes.find("bndbox/xmax").text),
@@ -62,6 +60,40 @@ def read_content(target: str):
         Record[Id] += 1
         box_count_list[Id] += 1
     img_pool.loc[target] = box_count_list
+    global outerbox_ID, outerbox_pool, outerbox_pool_count
+    for outerbox in list_with_all_boxes:
+        box_count_list = [0]*20
+        inner_content = []
+        for innerbox in list_with_all_boxes:
+            crop_xmax = np.clip(innerbox['xmax'], outerbox['xmin'], outerbox['xmax']) - outerbox['xmin']
+            crop_xmin = np.clip(innerbox['xmin'], outerbox['xmin'], outerbox['xmax']) - outerbox['xmin']
+            crop_ymax = np.clip(innerbox['ymax'], outerbox['ymin'], outerbox['ymax']) - outerbox['ymin']
+            crop_ymin = np.clip(innerbox['ymin'], outerbox['ymin'], outerbox['ymax']) - outerbox['ymin']
+
+            new_box = [crop_xmin, crop_ymin, crop_xmax, crop_ymax, innerbox['Id']]
+            #print(outerbox)
+            #print(innerbox)
+            #print(new_box)
+            crop_area = (crop_xmax-crop_xmin)*(crop_ymax-crop_ymin)
+            box_area = (innerbox['xmax']-innerbox['xmin'])*(innerbox['ymax']-innerbox['ymin'])
+
+            max_x_diff = (outerbox['xmax']-outerbox['xmin'])
+            max_y_diff = (outerbox['ymax']-outerbox['ymin'])
+            
+            if crop_area > box_area*0.3:
+#                if  max_x_diff != (crop_xmax - crop_xmin):
+                   
+#                    print(max_x_diff, max_y_diff)
+#                    print(new_box)
+#                    print('whats going on')
+                inner_content.append(new_box)
+                box_count_list[innerbox['Id']] += 1
+        outerbox_ID += 1
+        outerbox_pool[outerbox_ID] = {'outerbox':outerbox, 'inner_content':inner_content}
+        outerbox_pool_count.loc[outerbox_ID] = box_count_list
+
+
+    
     return list_with_all_boxes
 
 def crop_img(box):
@@ -99,18 +131,40 @@ def random_flip_horizontal(src_img, main_img, target_main):
             #box.set('bndbox/ymax', str(new_ymax))
     #ET.dump(root)
     return src_img, main_img, tree
-def Large_Scale_Jittering(img):
-    rescale_ratio = np.random.uniform(0.1, 2.0)
-    h, w, _, = img.shape
+def Large_Scale_Jittering(outerbox, bboxes):
+    img_path = os.path.join(train_Image_path, outerbox['target']+'.jpg')
+    img = cv2.imread(img_path)
+    crop_img = img[
+        outerbox['ymin']:outerbox['ymax'],
+        outerbox['xmin']:outerbox['xmax']
+    ]
+    
+    rescale_ratio = np.random.uniform(0.4, 1.6)
+    h, w, _, = crop_img.shape
+    #if min(h,w)<50:
+    #    rescale_ratio = np.random.uniform(0.5, 1.8)
+    #else:
+    #    rescale_ratio = np.random.uniform(0.4, 1.7)
     # rescale
     h_new, w_new = max(int(h*rescale_ratio),1), max(int(w*rescale_ratio),1)
-    try:
-        img = cv2.resize(img, (w_new, h_new), interpolation=cv2.INTER_LINEAR)
-    except:
-        print("WHAT???")
-    return img
 
-def img_clone(src_img, main_img, box, tree):
+    new_img = cv2.resize(crop_img, (w_new, h_new), interpolation=cv2.INTER_LINEAR)
+    new_bboxes = []
+    #print(w,h)
+    #print(w_new, h_new)
+    #print(bboxes)
+    #if bboxes
+    for bbox in bboxes:
+        #print(bbox)
+        #bbox[:4] = [int(i*rescale_ratio) for i in bbox[:4]]
+        nbbox = [int(i*rescale_ratio) for i in bbox[:4]]
+        nbbox.append(bbox[4])
+        #print(bbox)
+        new_bboxes.append(nbbox)
+    #print(bboxes)
+    return new_img, new_bboxes
+
+def img_clone(src_img, main_img, bboxes, main_target, src_target):
     
     global Record
 
@@ -124,11 +178,13 @@ def img_clone(src_img, main_img, box, tree):
     #canvas = im
     mask = 255*np.ones(src_img.shape, src_img.dtype)
     if (mask.shape[0]<=4) or (mask.shape[1]<=4):
-        return None
+        return None, None
     h_var = np.random.randint(low=int(s_h*1.5), high=max(int(s_h*0.5+m_h),int(s_h*1.5)+1))
     w_var = np.random.randint(low=int(s_w*1.5), high=max(int(s_w*0.5+m_w),int(s_w*1.5)+1))
 
     center = (w_var, h_var)
+    paste_xmin = int(w_var - 0.5*s_w)
+    paste_ymin = int(h_var - 0.5*s_h)
     try:
         normal_clone = cv2.seamlessClone(src_img, canvas, mask, center, cv2.NORMAL_CLONE)
     except:
@@ -143,34 +199,41 @@ def img_clone(src_img, main_img, box, tree):
     #cv2.imshow('o', output_img)
     #cv2.waitKey()
     # modify annotation
-    local_xmin = max(0, int(w_var-1.5*s_w))
-    local_xmax = min(m_w, int(w_var-0.5*s_w))
-    local_ymin = max(0, int(h_var-1.5*s_h))
-    local_ymax = min(m_h, int(h_var-0.5*s_h))
-   
-    new_box = ET.Element('object')
+    box_total = 0
+    new_box_list = []
+    for box in bboxes:
+        local_xmin = np.clip(paste_xmin+box[0]-s_w, 0, m_w)
+        local_xmax = np.clip(paste_xmin+box[2]-s_w, 0, m_w)
+        local_ymin = np.clip(paste_ymin+box[1]-s_h, 0, m_h)
+        local_ymax = np.clip(paste_ymin+box[3]-s_h, 0, m_h)
+
+        or_area = (box[2]-box[0]) * (box[3]-box[1])
+        new_area = (local_xmax-local_xmin) * (local_ymax-local_ymin)
+        if new_area >= or_area*0.5:
+            Record[box[4]] += 1
+            box_total += 1
+            #print('inner++', Record, box[4])
+            new_box = ET.Element('object')
+            ET.SubElement(new_box, 'source').text = src_target
+            ET.SubElement(new_box, 'ID').text = str(box[4])
+            bndbox = ET.SubElement(new_box, 'bndbox')
+            ET.SubElement(bndbox, 'xmin').text = str(local_xmin)
+            ET.SubElement(bndbox, 'ymin').text = str(local_ymin)
+            ET.SubElement(bndbox, 'xmax').text = str(local_xmax)
+            ET.SubElement(bndbox, 'ymax').text = str(local_ymax)
+            new_box_list.append(new_box)
+    
     #ET.dump(new_box)
     
-    ET.SubElement(new_box, 'name').text = box['name']
-    ET.SubElement(new_box, 'pose').text = box['pose']
-    ET.SubElement(new_box, 'truncated').text = box['truncated']
-    ET.SubElement(new_box, 'difficult').text = box['difficult']
-    bndbox = ET.SubElement(new_box, 'bndbox')
-    ET.SubElement(bndbox, 'xmin').text = str(local_xmin)
-    ET.SubElement(bndbox, 'ymin').text = str(local_ymin)
-    ET.SubElement(bndbox, 'xmax').text = str(local_xmax)
-    ET.SubElement(bndbox, 'ymax').text = str(local_ymax)
-
+    #ET.SubElement(new_box, 'name').text = box['name']
+    
+    target_xml_path = os.path.join(train_annotation_path, main_target + '.xml')
+    tree = ET.parse(target_xml_path)
     root = tree.getroot()
 
-     # remove overlap
-    box_count = 0
-    for box in root.iter('object'):
-        box_count+=1
-    actual_count = 0
+    # remove box
     boxes = [i for i in root.iter('object')]
     for box in boxes:
-        actual_count += 1
         xmin = int(box.find("bndbox/xmin").text)
         ymin = int(box.find("bndbox/ymin").text)
         xmax = int(box.find("bndbox/xmax").text)
@@ -185,19 +248,24 @@ def img_clone(src_img, main_img, box, tree):
         else:
             Id = NametoId.get(box.find("name").text, -1)
             Record[Id] += 1
+            box_total += 1
+            Idtag = ET.Element('ID')
+            Idtag.text = str(Id)
+            box.insert(0, Idtag)
 
-
-    if actual_count!=box_count:
-        print(actual_count, box_count)
-    root.append(new_box)
+            
+            #print('main++', root.find('filename').text,Record, Id)
+    for new_box in new_box_list:
+        root.append(new_box)
     
     ET.indent(root)
-    #ET.dump(root)
-    return output_img
+    if box_total==0:
+        return None, None
+    return output_img, tree
+    #return normal_clone
 
 
-
-    return normal_clone
+    
 def img_add(src_img, main_img, box, tree):
     global Record
 
@@ -230,9 +298,8 @@ def img_add(src_img, main_img, box, tree):
     #ET.dump(new_box)
     
     ET.SubElement(new_box, 'name').text = box['name']
-    ET.SubElement(new_box, 'pose').text = box['pose']
-    ET.SubElement(new_box, 'truncated').text = box['truncated']
-    ET.SubElement(new_box, 'difficult').text = box['difficult']
+    ET.SubElement(new_box, 'source').text = box['target']
+    
     bndbox = ET.SubElement(new_box, 'bndbox')
     ET.SubElement(bndbox, 'xmin').text = str(local_xmin)
     ET.SubElement(bndbox, 'ymin').text = str(local_ymin)
@@ -273,20 +340,25 @@ def img_add(src_img, main_img, box, tree):
     #ET.dump(root)
     return output_img
     
-
+import matplotlib.pyplot as plt 
 count = 10000
-def copy_paste(box, target_main):
+def copy_paste(pick_box_ID, target_main):
     # read img
-    src_img = crop_img(box)
+    outerbox = outerbox_pool[pick_box_ID]['outerbox']
+    #target = tar
+    bboxes = outerbox_pool[pick_box_ID]['inner_content']
     main_img = cv2.imread(os.path.join(train_Image_path, target_main+'.jpg'))
+    #main_img2 = cv2.imread(os.path.join(train_Image_path, target_main+'.jpg'))[:,:,::-1]
+    #cv2.imwrite('py.jpg', main_img)
+    #cv2.imwrite('pyt.jpg', main_img2)
     # random flip
-    src_img, main_img, tree = random_flip_horizontal(src_img, main_img, target_main)
+    #src_img, main_img, tree = random_flip_horizontal(src_img, main_img, target_main)
     # Large Scale Jittering
-    src_img = Large_Scale_Jittering(src_img)
+    src_img, new_bboxes = Large_Scale_Jittering(outerbox, bboxes)
     # for the last
     #cv2.imshow("MYI",src_img)
     #cv2.waitKey(0)
-    img = img_clone(src_img, main_img, box, tree)
+    img, tree = img_clone(src_img, main_img, new_bboxes, target_main, outerbox['target'])
     #img = img_add(src_img, main_img, box, tree)
     if img is not None:
         global count 
@@ -307,30 +379,49 @@ box_list = []
 box_dict = {}
 
 Record = [0]*20 
-box_pool = pd.DataFrame(columns=['target', 'name', 'Id', 'pose', 'truncated', 'difficult', 'xmin', 'ymin', 'xmax', 'ymax'])
+box_pool = pd.DataFrame(columns=['target', 'name', 'Id', 'xmin', 'ymin', 'xmax', 'ymax'])
 img_pool = pd.DataFrame(columns = [i for i in range(20)])
-img_pool = pd.DataFrame(columns = [i for i in range(20)])
+outerbox_pool = {}
+outerbox_pool_count = pd.DataFrame(columns = [i for i in range(20)])
 def balance_pick():
     global Record, box_pool, img_pool
     min_count, max_count = min(Record), max(Record)
-    max1, max2, max3, max4, max5 = sorted(Record, reverse=True)[:5]
-    if min_count*1.2 > max_count: # balanced
+    #max1, max2, max3, max4, max5 = sorted(Record, reverse=True)[:5]
+    if min_count > max_count*0.85: # balanced
         return None, None
     else: # inbalanced
-        min_class, max_class = Record.index(min_count), Record.index(max_count)
-        max1_class = Record.index(max1)
-        max2_class = Record.index(max2)
-        max3_class = Record.index(max3)
-        max4_class = Record.index(max4)
-        max5_class = Record.index(max5)
-        pick_box = box_pool[box_pool['Id']==min_class].sample(n=1).to_dict('records')[0]
+        sorted_index = sorted(range(len(Record)), key=lambda i: Record[i])
+        max1_class, max2_class, max3_class, max4_class, max5_class = sorted_index[-5:] #top 5 class
+        min_class = sorted_index[0]
+        #min_class, max_class = Record.index(min_count), Record.index(max_count)
+        #max1_class = Record.index(max1)
+        #max2_class = Record.index(max2)
+        #max3_class = Record.index(max3)
+        #max4_class = Record.index(max4)
+        #max5_class = Record.index(max5)
+        #print(min_class, max1_class, max2_class, max3_class, max4_class, max5_class)
+        avail = outerbox_pool_count[
+            (outerbox_pool_count[min_class]>0) &
+            (outerbox_pool_count[max1_class]==0) &
+            (outerbox_pool_count[max2_class]==0) &
+            (outerbox_pool_count[max3_class]==0) &
+            (outerbox_pool_count[max4_class]==0) &
+            (outerbox_pool_count[max5_class]==0)
+        ]
+        if avail.shape[0]==0:
+            print(avail)
+            print("stop")
+        pick_box_ID = avail.sample(n=1).index[0]
+        # pick_box = box_pool[box_pool['Id']==min_class].sample(n=1).to_dict('records')[0]
+        #pick_box = outerbox_pool[pick_box_ID]
         main_img = img_pool[(img_pool[max1_class]==0) & (img_pool[max2_class]==0) & (img_pool[max3_class]==0) & (img_pool[max4_class]==0) & (img_pool[max5_class]==0)].sample(n=1).index[0]
-        return pick_box, main_img
+
+        return pick_box_ID, main_img
 
 
 def main():
     #target_list = [os.path.splitext(i)[0] for i in os.listdir(train_annotation_path)]
-    target_list = [i.split('.')[0] for i in os.listdir(train_annotation_path)[:100]]
+    target_list = [i.split('.')[0] for i in os.listdir(train_annotation_path)[:]]
     global box_list, Record
     #global box_pool
     # read all box in train dataset
@@ -348,24 +439,30 @@ def main():
     if not os.path.exists('output\Annotations'):
         os.mkdir('output\Annotations')
     
-    print(box_pool.head(5))
-    print(Record)
+    #print(box_pool.head(5))
+    #print(Record)
     #print(img_pool)
     #return
     #for box in tqdm(box_list):
     #    target_main = np.random.choice(target_list)
     #    copy_paste(box, target_main)
     #return
-    pick, target_main = balance_pick()
+    pick_box_ID, target_main = balance_pick()
     
-    while pick != None:
-        Record[pick['Id']] += 1
-        print(Record)
+    while pick_box_ID != None:
+        #Record = [a+b for a,b in zip(outerbox_pool_count.loc[pick_box_ID].tolist(), Record)]
+        
+        #print('pick', pick_box_ID)
+        
         #target_main = np.random.choice(target_list)
         #copy_paste(box_pool.iloc[14].to_dict(),'000026')
-        copy_paste(pick, target_main)
-        pick, target_main = balance_pick()
+        #copy_paste(pick, '000005')
+        copy_paste(pick_box_ID, target_main)
 
+        print(Record)
+        pick_box_ID, target_main = balance_pick()
+        #print(outerbox_pool_count.loc[pick_box_ID].values.tolist())
+        #print(img_pool.loc[target_main].values.tolist())
 
 if __name__=='__main__':
     main()

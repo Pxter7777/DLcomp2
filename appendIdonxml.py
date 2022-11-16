@@ -31,6 +31,8 @@ NametoId = {
 }
 origin_xml_path = os.path.join('.', 'output', "Annotations")
 output_xml_path = os.path.join('.', 'output', "Annotations_with_ID")
+#origin_xml_path = os.path.join('.', 'datalab-2021-cup2-object-detection', 'VOCdevkit_train', 'VOC2007', 'Annotations')
+#output_xml_path = os.path.join('.', 'datalab-2021-cup2-object-detection', 'VOCdevkit_train', 'VOC2007', 'Annotations_with_ID')
 if not os.path.exists(output_xml_path):
     os.mkdir(output_xml_path)
 def read_content(target: str):
