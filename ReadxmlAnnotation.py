@@ -186,10 +186,11 @@ def img_clone(src_img, main_img, bboxes, main_target, src_target):
     paste_xmin = int(w_var - 0.5*s_w)
     paste_ymin = int(h_var - 0.5*s_h)
     try:
-        normal_clone = cv2.seamlessClone(src_img, canvas, mask, center, cv2.NORMAL_CLONE)
+        #normal_clone = cv2.seamlessClone(src_img, canvas, mask, center, cv2.NORMAL_CLONE)
+        canvas[paste_ymin:paste_ymin+s_h,paste_xmin:paste_xmin+s_w] = src_img
     except:
         print("WTF")
-    output_img = normal_clone[s_h:s_h+m_h, s_w:s_w+m_w]
+    output_img = canvas[s_h:s_h+m_h, s_w:s_w+m_w]
     #cv2.imshow('o', src_img)
     #cv2.waitKey()
     #cv2.imshow('o', mask)

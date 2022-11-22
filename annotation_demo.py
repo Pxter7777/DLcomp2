@@ -151,7 +151,7 @@ box_dict = {}
 
 def main():
     #target_list = [os.path.splitext(i)[0] for i in os.listdir(train_annotation_path)]
-    target_list = [i.split('.')[0] for i in os.listdir(output_Annotation_Path)[50000:]]
+    target_list = [i.split('.')[0] for i in os.listdir(output_Annotation_Path)[:]]
     #target_list = ['0000056', '0000075']
     global box_list
 
